@@ -1,3 +1,6 @@
+from __future__ import division
+
+
 def mi_linear(arg1, arg2, output_size, global_bias_start=0.0, scope=None):
     """Multiplicated Integrated Linear map:
     See http://arxiv.org/pdf/1606.06630v1.pdf

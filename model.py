@@ -1,4 +1,5 @@
 from __future__ import division
+from __future__ import print_function
 
 import time
 from datetime import timedelta
@@ -221,11 +222,6 @@ with tf.Graph().as_default(), tf.Session() as sess:
         writer.add_summary(summary, epoch)
         end_time = time.time()
         mean_time_per_epoch = (end_time - start_time) / (epoch + 1)
-        estimated_seconds = mean_time_per_epoch * (conf.num_epochs - epoch)
-        estimated_end = timedelta(seconds=estimated_seconds)
-        print("Mean time per epoch: {:.5f}\n"
-              "Training should be finished in about: {}".format(
-                mean_time_per_epoch, estimated_end))
 
         # Model evaluation
         if epoch % conf.display_epoch == 0:
@@ -238,7 +234,11 @@ with tf.Graph().as_default(), tf.Session() as sess:
                       conf.num_epochs * reader.total_batches,
                       epoch, cost_res, mean_loss, perplexity,
                       current_learning_rate))
-
+            estimated_seconds = mean_time_per_epoch * (conf.num_epochs - epoch)
+            estimated_end = timedelta(seconds=estimated_seconds)
+            print("Mean time per epoch: {:.5f}\n"
+                  "Training should be finished in about: {}".format(
+                    mean_time_per_epoch, estimated_end))
 
             predicted_text = eval_model.get_sample(
                 sess=sess, chars=reader.unique_tokens,
