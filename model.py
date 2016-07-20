@@ -133,7 +133,7 @@ class Config(object):
     # dropout for training
     dropout = 0.7
     # number of epochs
-    num_epochs = 10000
+    num_epochs = 5000
     # batch size for reader
     batch_size = 50
     # letter chunk size at batch
