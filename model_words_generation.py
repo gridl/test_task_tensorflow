@@ -4,6 +4,7 @@ from __future__ import print_function
 import time
 from datetime import timedelta
 import argparse
+import os
 
 import tensorflow as tf
 from tensorflow.python.ops import rnn_cell, rnn
@@ -163,8 +164,8 @@ parser.add_argument('--use_peepholes', dest='use_peepholes',
                     action='store_true',
                     help="if lstm or milstm it enable peepholes")
 parser.set_defaults(use_peepholes=False)
-parser.add_argument('--num_cores', type=int, default=4,
-                    help="num of threads used for computation")
+parser.add_argument('--log_dir', type=str, default='logs',
+                    help="path to folder where logs should be stored")
 args = parser.parse_args()
 args_dict = vars(args)
 args_dict['model_name'] = model_name = args.model.lower().strip()
@@ -176,17 +177,14 @@ model_dict = {
 }
 args_dict['cell_model'] = cell_model = model_dict[model_name]
 conf = Config(args_dict)
-logs_path = 'logs/{}'.format(model_name)
+logs_path = os.path.join(args.log_dir, model_name)
 print("\nModel type: {}, batch size: {}, sequence size: {}".format(
     model_name, conf.batch_size, conf.sequence_size))
 
 # Commence training and evaluation
 # ================================
-NUM_CORES = args.num_cores
 sess = tf.Session()
-with tf.Graph().as_default(), tf.Session(config=tf.ConfigProto(
-        inter_op_parallelism_threads=NUM_CORES,
-        intra_op_parallelism_threads=NUM_CORES)) as sess:
+with tf.Graph().as_default(), tf.Session() as sess:
     writer = tf.train.SummaryWriter(logs_path, sess.graph)
     # initialize the DataReader
     reader = DataReader(
