@@ -17,23 +17,20 @@ from data_reader import DataReader
 # Define or model
 # ===============
 class RNN_Model(object):
-    def __init__(self, config):
+    def __init__(self, config, evaluation=False):
+        if evaluation:
+            config.batch_size = config.sequence_size = 1
         self.config = config
 
         # Main model structure
-        if config.mi_type:
-            cell = mi_rnn_cell.MIGRUCell(config.hidden_layer_size)
-            dropped_cell = mi_rnn_cell.DropoutWrapper(
-                cell, output_keep_prob=config.dropout)
-            self.cell = cell = mi_rnn_cell.MultiRNNCell(
-                [dropped_cell] * config.layers_qtty)
+        if config.use_peepholes and config.model_name in ['lstm', 'milstm']:
+            print("Create model with peepholdes")
+            cell = config.cell_model(
+                config.hidden_layer_size, use_peepholes=True)
         else:
-            cell = rnn_cell.GRUCell(config.hidden_layer_size)
-            dropped_cell = rnn_cell.DropoutWrapper(
-                cell, output_keep_prob=config.dropout)
-            self.cell = cell = rnn_cell.MultiRNNCell(
-                [dropped_cell] * config.layers_qtty)
-
+            print("Create model without peepholes")
+            cell = config.cell_model(config.hidden_layer_size)
+        self.cell = cell = rnn_cell.MultiRNNCell([cell] * config.layers_qtty)
         self.initial_state = cell.zero_state(config.batch_size, tf.float32)
 
         self.input_x = tf.placeholder(
@@ -48,12 +45,12 @@ class RNN_Model(object):
             # split 2D tensor into list of tensors [[batch_size, 1]]
             # as input we send a list with len == sequence_size and
             # batch_size X 1 unit. really we just create rotated batches
-            with tf.device("/cpu:0"):
-                embedding = tf.get_variable(
-                    "embedding", [config.vocab_size, config.hidden_layer_size])
-                embeded = tf.nn.embedding_lookup(embedding, self.input_x)
-                inputs = tf.split(1, config.sequence_size, embeded)
-                inputs_list = [tf.squeeze(input_, [1]) for input_ in inputs]
+
+            embedding = tf.get_variable(
+                "embedding", [config.vocab_size, config.hidden_layer_size])
+            embeded = tf.nn.embedding_lookup(embedding, self.input_x)
+            inputs = tf.split(1, config.sequence_size, embeded)
+            inputs_list = [tf.squeeze(input_, [1]) for input_ in inputs]
 
         outputs, self.final_state = rnn.rnn(
             self.cell, inputs_list, initial_state=self.initial_state)
@@ -129,72 +126,86 @@ class Config(object):
     # hidden layer number of features
     hidden_layer_size = 100
     # number of layers for multilayers RNN
-    layers_qtty = 2
-    # dropout for training
-    dropout = 0.7
-    # number of epochs
-    num_epochs = 5000
+    layers_qtty = 3
     # batch size for reader
-    batch_size = 50
+    batch_size = 4
     # letter chunk size at batch
-    sequence_size = 50
-    # how many letters should be guessed during evaluation
-    guess_letters_qtty = 10
-    # how often to display the results
-    display_epoch = 100
+    sequence_size = 2
+    # size of vocabulary
+    vocab_size = None
+    # number of epochs
+    num_epochs = 500
+    # how often info should be displayed and added to logs by SummaryWriter
+    display_epoch = 10
     # Quantity of letters to predict by trained model
     num_to_predict = 100
 
-    def __init__(self, vocab_size, batch_size=None, sequence_size=None,
-                 dropout=None, mi_type=False):
-        self.vocab_size = vocab_size
-        # use mi type or not
-        self.mi_type = mi_type
-        if batch_size and sequence_size:
-            self.batch_size = batch_size
-            self.sequence_size = sequence_size
-        if dropout:
-            self.dropout = dropout
+    def __init__(self, vars_dict):
+        for attr_name, attr_value in vars_dict.items():
+            setattr(self, attr_name, attr_value)
 
+# Define argument parser and arguments handling
+# =============================================
 parser = argparse.ArgumentParser()
-parser.add_argument('--enable_mi', dest="mi_type", action="store_true")
-parser.add_argument('--disable_mi', dest="mi_type", action="store_false")
-parser.set_defaults(mi_type=True)
+parser.add_argument('--model', type=str, required=True,
+                    help="gru, migru, lstm or milstm")
+parser.add_argument('--data_path', type=str, default='data/input.txt',
+                    help="path to text file that model should be trained from")
+parser.add_argument('--batch_size', type=int, default=4,
+                    help="batch size for reader")
+parser.add_argument('--sequence_size', type=int, default=2,
+                    help="letter chunk size at batch")
+parser.add_argument('--num_epochs', type=int, default=500,
+                    help="number of epochs")
+parser.add_argument('--display_epoch', type=int, default=10,
+                    help="how often info should be displayed and logged")
+parser.add_argument('--use_peepholes', dest='use_peepholes',
+                    action='store_true',
+                    help="if lstm or milstm it enable peepholes")
+parser.set_defaults(use_peepholes=False)
+parser.add_argument('--num_cores', type=int, default=4,
+                    help="num of threads used for computation")
 args = parser.parse_args()
+args_dict = vars(args)
+args_dict['model_name'] = model_name = args.model.lower().strip()
+model_dict = {
+    'gru': rnn_cell.GRUCell,
+    'migru': mi_rnn_cell.MIGRUCell,
+    'lstm': rnn_cell.LSTMCell,
+    'milstm': mi_rnn_cell.MILSTMCell
+}
+args_dict['cell_model'] = cell_model = model_dict[model_name]
+conf = Config(args_dict)
+logs_path = 'logs/{}'.format(model_name)
+print("\nModel type: {}, batch size: {}, sequence size: {}".format(
+    model_name, Config.batch_size, Config.sequence_size))
 
 # Commence training and evaluation
 # ================================
-with tf.Graph().as_default(), tf.Session() as sess:
-    if args.mi_type:
-        logs_path = "logs/mi_type"
-    else:
-        logs_path = "logs/default_type"
+NUM_CORES = args.num_cores
+sess = tf.Session()
+with tf.Graph().as_default(), tf.Session(config=tf.ConfigProto(
+        inter_op_parallelism_threads=NUM_CORES,
+        intra_op_parallelism_threads=NUM_CORES)) as sess:
     writer = tf.train.SummaryWriter(logs_path, sess.graph)
-    # get our configs classes
+    # initialize the DataReader
     reader = DataReader(
-        batch_size=Config.batch_size,
-        sequence_size=Config.sequence_size,
-        data_path='data/input_large.txt')
+        batch_size=conf.batch_size,
+        sequence_size=conf.sequence_size,
+        data_path=args.data_path)
     reader.print_data_info()
-    conf = train_conf = Config(
-        vocab_size=reader.vocabularySize,
-        mi_type=args.mi_type)
-    eval_conf = Config(
-        vocab_size=reader.vocabularySize,
-        batch_size=1,
-        sequence_size=1,
-        dropout=1,
-        mi_type=args.mi_type)
+    conf.vocab_size = reader.vocabularySize
 
     with tf.variable_scope("SimpleRNN", reuse=None):
-        train_model = RNN_Model(config=train_conf)
+        train_model = RNN_Model(config=conf)
     with tf.variable_scope("SimpleRNN", reuse=True):
-        eval_model = RNN_Model(config=eval_conf)
+        eval_model = RNN_Model(config=conf, evaluation=True)
 
     tf.initialize_all_variables().run()
 
     mean_time_per_epoch = 0
     start_time = time.time()
+    print('\n'*2)
     for epoch in range(conf.num_epochs):
         # additional variables to track the model
         losses = 0
@@ -219,16 +230,17 @@ with tf.Graph().as_default(), tf.Session() as sess:
                 feed_dict=feed_dict)
             losses += loss_res
             batch_index += 1
-        writer.add_summary(summary, epoch)
         end_time = time.time()
         mean_time_per_epoch = (end_time - start_time) / (epoch + 1)
 
         # Model evaluation
         if epoch % conf.display_epoch == 0:
+            writer.add_summary(summary, epoch)
             mean_loss = np.mean(losses / (epoch + 1))
             status_message = ("{}/{} (epoch {}), cost_res: {:.3f}, "
                               "mean_loss: {:.5f}, perplexity: {:.3f}, "
                               "current learning rate: {:.5f}")
+            print('-'*50)
             print(status_message.format(
                       epoch * reader.total_batches + batch_index,
                       conf.num_epochs * reader.total_batches,
@@ -239,9 +251,9 @@ with tf.Graph().as_default(), tf.Session() as sess:
             print("Mean time per epoch: {:.5f}\n"
                   "Training should be finished in about: {}".format(
                     mean_time_per_epoch, estimated_end))
-
             predicted_text = eval_model.get_sample(
                 sess=sess, chars=reader.unique_tokens,
                 vocab=reader.token_to_id, num_to_predict=conf.num_to_predict,
                 initial_sentence=' ')
+            print('-'*10)
             print(predicted_text)
