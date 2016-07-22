@@ -178,7 +178,7 @@ args_dict['cell_model'] = cell_model = model_dict[model_name]
 conf = Config(args_dict)
 logs_path = 'logs/{}'.format(model_name)
 print("\nModel type: {}, batch size: {}, sequence size: {}".format(
-    model_name, Config.batch_size, Config.sequence_size))
+    model_name, conf.batch_size, conf.sequence_size))
 
 # Commence training and evaluation
 # ================================
